@@ -79,12 +79,19 @@ __proc_buf_copy(struct nod_proc_info *this, unsigned long *ret, va_list args)
     uint64_t len = va_arg(args, uint64_t);
 
     if (*count + buf->info->tail <= len) {
-        if (copy_to_user((void *)*ptr, (void *)buf->buffer, buf->info->tail)) {
+        uint32_t copied = buf->info->tail;
+        if (copy_to_user((void *)*ptr, (void *)buf->buffer, copied)) {
             *ret = -EFAULT;
             return NOD_PROC_TRAVERSE_BREAK;
         }
-        *ptr += buf->info->tail;
-        *count += buf->info->tail;
+        *ptr += copied;
+        *count += copied;
+        /*
+         * In fetch-only mode (monitor injection disabled), userspace reads
+         * via ioctl and this is the equivalent "consume" point.
+         * Clear unflushed buffer state after successful copy.
+         */
+        reset_buffer(buf, NOD_INIT_INFO);
         *ret = 0;
         return NOD_PROC_TRAVERSE_CONTINUE;
     } else {

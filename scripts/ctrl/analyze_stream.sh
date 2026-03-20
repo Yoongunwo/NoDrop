@@ -89,14 +89,14 @@ END {
   bytes_per_wall_sec = (wall_ns > 0) ? (total_bytes * 1e9 / wall_ns) : 0;
 
   printf("fetch_batches=%d\n", n);
-  printf("total_events=%d\n", total_events);
+  printf("total_events_idx_hint=%d\n", total_events);
   printf("total_bytes=%d\n", total_bytes);
   printf("window_start_ns=%d\n", first_start);
   printf("window_end_ns=%d\n", last_end);
   printf("window_sec=%.6f\n", wall_ns/1e9);
   printf("fetch_time_sec=%.6f\n", total_fetch_ns/1e9);
-  printf("throughput_events_per_sec_wall=%.3f\n", ev_per_wall_sec);
-  printf("throughput_events_per_sec_fetch_only=%.3f\n", ev_per_fetch_sec);
+  printf("throughput_events_per_sec_wall_idx_hint=%.3f\n", ev_per_wall_sec);
+  printf("throughput_events_per_sec_fetch_only_idx_hint=%.3f\n", ev_per_fetch_sec);
   printf("throughput_bytes_per_sec_wall=%.3f\n", bytes_per_wall_sec);
   printf("fetch_latency_ms_p50=%.3f\n", dur[p50_idx]/1e6);
   printf("fetch_latency_ms_p95=%.3f\n", dur[p95_idx]/1e6);
