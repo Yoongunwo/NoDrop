@@ -59,7 +59,8 @@ MODULE_PARM_DESC(target_comm,
 static int nod_target_task(struct task_struct *task)
 {
     char allowlist[sizeof(target_comm)];
-    char *cursor, *token;
+    char *p, *start;
+    size_t i, comm_len;
 
     if (!task || !task->comm[0]) {
         return 0;
@@ -69,16 +70,42 @@ static int nod_target_task(struct task_struct *task)
         return task->cred->uid.val == 1000;
     }
 
-    strscpy(allowlist, target_comm, sizeof(allowlist));
-    cursor = allowlist;
-    while ((token = strsep(&cursor, ",")) != NULL) {
-        token = strim(token);
-        if (token[0] == '\0') {
-            continue;
+    /* Local copy without depending on newer string helper symbols. */
+    i = 0;
+    while (i + 1 < sizeof(allowlist) && target_comm[i] != '\0') {
+        allowlist[i] = target_comm[i];
+        i++;
+    }
+    allowlist[i] = '\0';
+
+    comm_len = strlen(task->comm);
+    start = allowlist;
+    p = allowlist;
+    for (;;) {
+        if (*p == ',' || *p == '\0') {
+            char *l = start;
+            char *r = p - 1;
+            size_t tok_len;
+
+            while (l <= r && (*l == ' ' || *l == '\t')) {
+                l++;
+            }
+            while (r >= l && (*r == ' ' || *r == '\t')) {
+                r--;
+            }
+
+            tok_len = (r >= l) ? (size_t)(r - l + 1) : 0;
+            if (tok_len == comm_len && tok_len > 0 &&
+                strncmp(task->comm, l, tok_len) == 0) {
+                return 1;
+            }
+
+            if (*p == '\0') {
+                break;
+            }
+            start = p + 1;
         }
-        if (strcmp(task->comm, token) == 0) {
-            return 1;
-        }
+        p++;
     }
 
     return 0;
