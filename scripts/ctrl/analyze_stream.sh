@@ -51,8 +51,14 @@ parse_stat_file() {
   END { if (!ok) exit 1; }' "$f"
 }
 
-read -r n1 d1 u1 < <(parse_stat_file "${STAT_BEFORE}")
-read -r n2 d2 u2 < <(parse_stat_file "${STAT_AFTER}")
+if ! read -r n1 d1 u1 < <(parse_stat_file "${STAT_BEFORE}"); then
+  echo "[analyze_stream] failed to parse stat_before: ${STAT_BEFORE}" >&2
+  exit 1
+fi
+if ! read -r n2 d2 u2 < <(parse_stat_file "${STAT_AFTER}"); then
+  echo "[analyze_stream] failed to parse stat_after: ${STAT_AFTER}" >&2
+  exit 1
+fi
 
 read -r delta_n delta_d delta_u < <(
   awk -v n1="${n1}" -v d1="${d1}" -v u1="${u1}" -v n2="${n2}" -v d2="${d2}" -v u2="${u2}" '
@@ -91,7 +97,11 @@ read -r fetch_batches wall_ns p50_ms p95_ms p99_ms < <(
   }' "${IDX}"
 )
 
-kernel_event_count="$("${DUMP_BIN}" "${RAW}" 2>/dev/null | awk 'END{print NR+0}')"
+# nodrop-dump may return non-zero when it finds malformed records.
+# We still want best-effort counting of successfully parsed output lines.
+kernel_event_count="$(
+  { "${DUMP_BIN}" "${RAW}" 2>/dev/null || true; } | awk 'END{print NR+0}'
+)"
 
 drop_rate_percent="$(awk -v miss="${delta_u}" -v called="${delta_n}" 'BEGIN{
   if (called<=0) print "0.000000";
@@ -112,4 +122,3 @@ echo "latency_ms_p50=${p50_ms}"
 echo "latency_ms_p95=${p95_ms}"
 echo "latency_ms_p99=${p99_ms}"
 echo "fetch_batches=${fetch_batches}"
-
