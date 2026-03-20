@@ -1,4 +1,6 @@
 #include <linux/kernel.h>
+#include <linux/module.h>
+#include <linux/string.h>
 #include <linux/version.h>
 #include <linux/kallsyms.h>
 #include <linux/ptrace.h>
@@ -42,6 +44,45 @@ static struct nod_syscall_filter syscall_filters[SYSCALL_TABLE_SIZE];
 static struct tracepoint *tp_sys_exit;
 #endif
 static struct tracepoint *tp_sched_process_exit;
+
+/*
+ * Limit instrumentation target by process name (task->comm).
+ * Example:
+ *   insmod nodrop.ko target_comm=helloworld,redis-server
+ * Empty value keeps the legacy behavior (uid == 1000).
+ */
+static char target_comm[128] = "";
+module_param_string(target_comm, target_comm, sizeof(target_comm), 0644);
+MODULE_PARM_DESC(target_comm,
+                 "Comma-separated process names to trace, empty means uid==1000");
+
+static int nod_target_task(struct task_struct *task)
+{
+    char allowlist[sizeof(target_comm)];
+    char *cursor, *token;
+
+    if (!task || !task->comm[0]) {
+        return 0;
+    }
+
+    if (target_comm[0] == '\0') {
+        return task->cred->uid.val == 1000;
+    }
+
+    strscpy(allowlist, target_comm, sizeof(allowlist));
+    cursor = allowlist;
+    while ((token = strsep(&cursor, ",")) != NULL) {
+        token = strim(token);
+        if (token[0] == '\0') {
+            continue;
+        }
+        if (strcmp(task->comm, token) == 0) {
+            return 1;
+        }
+    }
+
+    return 0;
+}
 
 /* compat tracepoint functions */
 static int compat_register_trace(void *func, const char *probename, struct tracepoint *tp)
@@ -127,7 +168,7 @@ TRACEPOINT_PROBE(syscall_exit_probe, struct pt_regs *regs, long ret)
     }
 
 #ifdef NOD_TEST
-    NOD_TEST(current) {
+    if (!nod_target_task(current)) {
         return;
     }
 #endif
@@ -217,7 +258,7 @@ TRACEPOINT_PROBE(syscall_procexit_probe, struct task_struct *tsk)
     }
 
 #ifdef NOD_TEST
-    NOD_TEST(tsk) {
+    if (!nod_target_task(tsk)) {
         return;
     }
 #endif
@@ -248,7 +289,8 @@ exit_filter(struct nod_proc_info *p, struct pt_regs *regs)
         break;
 
     default:
-        BUG();
+        vpr_warn("unexpected proc status %d in exit_filter for pid %d (%s)\n",
+                 p ? p->status : -1, current->pid, current->comm);
     }
 
     return 0;
@@ -287,6 +329,11 @@ hook_general(SYSCALL_DEF) {
     struct nod_proc_info *p;
     
     id = syscall_get_nr(current, current_pt_regs());
+    if (unlikely(id < 0 || id >= SYSCALL_TABLE_SIZE)) {
+        vpr_warn("invalid syscall id %d for pid %d (%s)\n",
+                 id, current->pid, current->comm);
+        return -ENOSYS;
+    }
 
 #if LINUX_VERSION_CODE > KERNEL_VERSION(2, 6, 20)
     if (unlikely(current->flags & PF_KTHREAD))
@@ -295,16 +342,26 @@ hook_general(SYSCALL_DEF) {
 #endif
     {
         // We are not interested in kernel threads
+        if (unlikely(!syscall_filters[id].oldsyscall)) {
+            return -ENOSYS;
+        }
         return syscall_filters[id].oldsyscall(SYSCALL_ARGS);
     }
 
 #ifdef NOD_TEST
-    NOD_TEST(current) {
+    if (!nod_target_task(current)) {
+        if (unlikely(!syscall_filters[id].oldsyscall)) {
+            return -ENOSYS;
+        }
         return syscall_filters[id].oldsyscall(SYSCALL_ARGS);
     }
 #endif
 
-    ASSERT(1 == syscall_filters[id].hooked);
+    if (unlikely(!syscall_filters[id].hooked || !syscall_filters[id].oldsyscall)) {
+        vpr_warn("hook state mismatch for syscall id %d pid %d (%s)\n",
+                 id, current->pid, current->comm);
+        return -ENOSYS;
+    }
     
     nod_event_from(&p);
 
