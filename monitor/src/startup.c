@@ -79,7 +79,10 @@ nod_restore_context(struct nod_stack_info *p) {
         // end = read_time();
         // printf("\n-%llu-%llu-\n", end - start, p->buffer_info->n_solved_evts - last_solved);
         // last_solved = p->buffer_info->n_solved_evts;
-        ioctl(p->ioctl_fd, NOD_IOCTL_RESTORE_CONTEXT, p);
+        if (ioctl(p->ioctl_fd, NOD_IOCTL_RESTORE_CONTEXT, p) != 0) {
+            /* Fail closed instead of continuing into undefined flow. */
+            syscall(SYS_exit_group, -1);
+        }
     }
     NOREACH
 }
@@ -197,6 +200,13 @@ nod_start_main(int argc, char **argv, char **env) {
     nod_monitor_main(p->buffer, p->buffer_info, &kstate, record_flag);
 
 out:
+    if (unlikely(p->ioctl_fd < 0)) {
+        /*
+         * We cannot restore thread context without the kernel control fd.
+         * Exit cleanly instead of crashing the target process with UB.
+         */
+        syscall(SYS_exit_group, -1);
+    }
     p->hash = nod_calc_hash(p);
     nod_restore_context(p);
 

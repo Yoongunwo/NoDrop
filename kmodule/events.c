@@ -1,5 +1,6 @@
 #include <linux/version.h>
 #include <linux/kernel.h>
+#include <linux/module.h>
 #include <linux/semaphore.h>
 #include <linux/vmalloc.h>
 
@@ -15,6 +16,10 @@ DEFINE_PER_CPU(struct nod_event_statistic, g_stat);
 EXPORT_PER_CPU_SYMBOL(g_stat);
 
 static volatile unsigned long nod_buffer_size = CONFIG_BUFFER_SIZE;
+static bool enable_monitor_injection = true;
+module_param(enable_monitor_injection, bool, 0644);
+MODULE_PARM_DESC(enable_monitor_injection,
+                 "Enable loading userspace monitor into target tasks");
 
 int nod_event_set_buffer_size(unsigned long size) {
     if (size < PAGE_SIZE) {
@@ -146,7 +151,7 @@ restart:
         stat->n_drop_evts++; 
     }
 
-    if (force) {
+    if (force && enable_monitor_injection) {
         cbret = nod_load_monitor(p);
     }
 
