@@ -58,7 +58,9 @@ int main(int argc, char *argv[]) {
             return -1;
         }
 
-        if (fwrite(fetch.buf, fetch.len, 1, file) == 1) {
+        if (fetch.len == 0) {
+            fprintf(stderr, "No buffered events to fetch (0 bytes)\n");
+        } else if (fwrite(fetch.buf, fetch.len, 1, file) == 1) {
             fprintf(stderr, "Write %lu bytes to file %s\n", fetch.len, argc <= 2 ? "stdout" : argv[2]);
         } else {
             fprintf(stderr, "Write to file %s failed\n", argc <= 2 ? "stdout" : argv[2]);

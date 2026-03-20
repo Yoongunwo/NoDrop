@@ -127,7 +127,12 @@ nod_dev_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
         }
 
         fetch.len = count;
-        if (copy_to_user((void *)ptr, (void *)&fetch, sizeof(fetch))) {
+        /*
+         * Return updated fetch metadata to the original ioctl argument.
+         * `ptr` now points to the end of copied payload and is not a valid
+         * destination for struct fetch_buffer_struct.
+         */
+        if (copy_to_user((void *)arg, (void *)&fetch, sizeof(fetch))) {
             ret = -EFAULT;
             goto out;
         }
