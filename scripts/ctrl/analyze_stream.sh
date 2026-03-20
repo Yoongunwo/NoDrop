@@ -4,18 +4,22 @@ set -euo pipefail
 # Analyze stream index produced by fetch_stream.sh.
 #
 # Usage:
-#   ./scripts/ctrl/analyze_stream.sh <stream.idx> [stream.raw]
+#   ./scripts/ctrl/analyze_stream.sh <stream.idx> [stream.raw] [stat_before.txt] [stat_after.txt]
 #
 # If stream.raw is provided and nodrop-dump exists, kernel event timestamp span
 # (first/last event ts) is also summarized.
+# If stat_before/stat_after are provided (output of `./scripts/ctrl/ctrl stat`),
+# drop deltas and drop rates for the experiment window are also summarized.
 
 if [ "$#" -lt 1 ]; then
-  echo "Usage: $0 <stream.idx> [stream.raw]" >&2
+  echo "Usage: $0 <stream.idx> [stream.raw] [stat_before.txt] [stat_after.txt]" >&2
   exit 2
 fi
 
 IDX="$1"
 RAW="${2:-}"
+STAT_BEFORE="${3:-}"
+STAT_AFTER="${4:-}"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DUMP_BIN="${SCRIPT_DIR}/nodrop-dump"
 
@@ -23,6 +27,21 @@ if [ ! -f "${IDX}" ]; then
   echo "[analyze_stream] idx not found: ${IDX}" >&2
   exit 1
 fi
+
+parse_stat_file() {
+  # prints: n_evts drop_evts drop_unsolved
+  local f="$1"
+  awk '
+  NR==2 {
+    if (NF >= 3) {
+      print $1, $2, $3;
+      ok=1;
+    }
+  }
+  END {
+    if (!ok) exit 1;
+  }' "$f"
+}
 
 awk '
 BEGIN {
@@ -115,3 +134,42 @@ if [ -n "${RAW}" ]; then
   }'
 fi
 
+if [ -n "${STAT_BEFORE}" ] && [ -n "${STAT_AFTER}" ]; then
+  if [ ! -f "${STAT_BEFORE}" ]; then
+    echo "[analyze_stream] stat_before not found: ${STAT_BEFORE}" >&2
+    exit 1
+  fi
+  if [ ! -f "${STAT_AFTER}" ]; then
+    echo "[analyze_stream] stat_after not found: ${STAT_AFTER}" >&2
+    exit 1
+  fi
+
+  if ! read -r n1 d1 u1 < <(parse_stat_file "${STAT_BEFORE}"); then
+    echo "[analyze_stream] failed to parse stat_before: ${STAT_BEFORE}" >&2
+    exit 1
+  fi
+  if ! read -r n2 d2 u2 < <(parse_stat_file "${STAT_AFTER}"); then
+    echo "[analyze_stream] failed to parse stat_after: ${STAT_AFTER}" >&2
+    exit 1
+  fi
+
+  awk -v n1="${n1}" -v d1="${d1}" -v u1="${u1}" -v n2="${n2}" -v d2="${d2}" -v u2="${u2}" '
+  BEGIN {
+    dn = n2 - n1;
+    dd = d2 - d1;
+    du = u2 - u1;
+    if (dn < 0) dn = 0;
+    if (dd < 0) dd = 0;
+    if (du < 0) du = 0;
+
+    total = dn + dd;
+    drop_rate = (total > 0) ? (dd * 100.0 / total) : 0.0;
+    unsolved_rate = (total + du > 0) ? (du * 100.0 / (total + du)) : 0.0;
+
+    printf("delta_n_evts=%d\n", dn);
+    printf("delta_drop_evts=%d\n", dd);
+    printf("delta_drop_unsolved=%d\n", du);
+    printf("drop_rate_internal_percent=%.6f\n", drop_rate);
+    printf("drop_unsolved_rate_percent=%.6f\n", unsolved_rate);
+  }'
+fi
